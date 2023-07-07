@@ -1,6 +1,6 @@
 import { useState,useEffect } from 'react';
 import {API_ENDPOINT,API_TOKEN,CONFIG} from '../utils/settings';
-import { goresCreateData,goresAllData,goresDelData } from '../utils/goresFetchData';
+import { goresCreateData,goresAllData, goresUpdateData ,goresDelData } from '../utils/goresFetchData';
 import { List } from "./list";
 import { gorestData } from '../utils/gorestData';
 import { Spinner } from './spinner';
@@ -31,6 +31,7 @@ export const Form = (props=undefined) =>{
     });
     const [errorMsg,setErrorMsg] = useState(null);
     const [data,setData] = useState(apiData.read());
+    const [searchBy,setSearchBy] = useState('');
     const [isChecked,setIsChecked] = useState((user.active==='active')?true:false);
     const [successMsg,setSuccessMsg] = useState(null);
     const {id,username,email,gender,active} = user;
@@ -40,32 +41,46 @@ export const Form = (props=undefined) =>{
     const [executing,setExecuting]=useState(null);
     const [countDeleted,setCountDeleted]=useState(0);
     const [countAdded,setCountAdded]=useState(0);
+    const [countUpdated,setCountUpdated]=useState(0);
+    const [crud,setCrud]=useState('Create');
 
     const [page,setPage]=useState(1);
     const [per_page,setPerPage]=useState(5);
 
 
-    const all = async () =>{
-        let url = API_ENDPOINT+'public/v2/users?page='+page+'&per_page='+per_page;
+    const all = async (id=undefined) =>{
+        let url = '';
+        if(id!==undefined)
+            url = API_ENDPOINT+'public/v2/users/'+id;
+        else
+            url = API_ENDPOINT+'public/v2/users?page='+page+'&per_page='+per_page;
         await goresAllData(url).then((added)=>{
             
         if(added.ok===false){
-            let error=added.json();
-            let messgError='';
-            for (let index = 0; index < error.length; index++) {
-                if(index>1)
-                    messgError+=error[index]['field']+' '+error[index]['message'];
+            let errors=added.json();
+            errors.then((error)=>{
+                let messgError='';
+                if(id!==undefined)
+                    messgError+=error['message'];
                 else
-                    messgError+=','+error[index]['field']+' '+error[index]['message'];
-                
-            }
-            setErrorMsg('error data: '+messgError);
-            setSuccessMsg(null);
+                    for (let index = 0; index < error.length; index++) {
+                        if(index>1)
+                            messgError+=error[index]['field']+' '+error[index]['message'];
+                        else
+                            messgError+=','+error[index]['field']+' '+error[index]['message'];
+                        
+                    }
+                setErrorMsg(''+messgError);
+                setSuccessMsg(null);
+            })
         }else if(added.ok===true){
             let datas = added.json();
             datas.then((rows)=>{
                 setSuccessMsg(null);
                 setErrorMsg(null);
+                if(id!==undefined)
+                setData(data.filter(user=>user.id===rows.id));
+                else
                 setData(rows);
             })
             setExecuting(null);
@@ -122,6 +137,43 @@ export const Form = (props=undefined) =>{
         return added;
     }
 
+    const update = async (props) =>{   
+        setErrorMsg(null);
+        setSuccessMsg(null);
+        setExecuting('Executing...'); 
+        let url = API_ENDPOINT+'public/v2/users/'+props.id;
+        let headers = CONFIG.headers_post;
+        var updated = await goresUpdateData(url,props,headers).then((response)=>{
+            let messgError='';
+            if(response.ok===false){
+                let error=response.json();
+                error.then((error)=>{
+                    for (let index = 0; index < error.length; index++) {
+                        if(index<1){
+                            messgError+=error[index]['field']+' '+error[index]['message'];
+                        }else{
+                            messgError+=','+error[index]['field']+' '+error[index]['message'];
+                        }
+                    }
+                    setErrorMsg(' '+messgError);
+                    setSuccessMsg(null);
+                })
+                
+            }else if(response.ok===true){
+                setSuccessMsg('Updated succefully');
+                setErrorMsg(null);
+                resetData();
+                let count = countUpdated+1;
+
+                setCountUpdated(count);
+                all();
+            }
+            setExecuting(null); 
+            setCrud('Create');
+        });
+        return updated;
+    }
+
     const deleteData = async (id) =>{
         setErrorMsg(null);
         setDeleted(null);
@@ -149,8 +201,23 @@ export const Form = (props=undefined) =>{
         });
     }
 
-    const resetData = ()=>{
-        setUser({
+    const showData = (iden) => {
+        let idToSplice = data.find(user=>user.id===iden);
+        setIsChecked(idToSplice.status==='inactive'?false:true);
+        let newUser = {
+            id:idToSplice.id,
+            username:idToSplice.name,
+            email:idToSplice.email,
+            gender:idToSplice.gender,
+            active:idToSplice.status
+        }
+        setUser(newUser);
+        setCrud('Update');
+    }
+
+    const resetData = (user=undefined)=>{
+        setUser(
+            user!==undefined?user:{
             id:generateRandomId(),
             username:'',
             email:'',
@@ -185,6 +252,31 @@ export const Form = (props=undefined) =>{
         setErrorMsg(errorMsg);
     }
 
+    const handleOnUpdate = (event) =>{
+        event.preventDefault();
+        const values = [id,username,email,gender,active];
+        let errorMsg='';
+        const allValuesFull = values.every((campo)=>{
+            const value = `${campo}`.trim();
+            return value!=='' && value!=='0';
+        });
+
+        if(allValuesFull){
+            let data={
+                id:user.id,
+                name:user.username,
+                email:user.email,
+                gender:user.gender,
+                status:(isChecked===true)?'active':'inactive'
+            }
+            
+            update(data);
+        }else{
+            errorMsg='values are missing';
+        }
+        setErrorMsg(errorMsg);
+    }
+
     const handleToogle= () => {
         setIsChecked(!isChecked);
     }
@@ -194,6 +286,12 @@ export const Form = (props=undefined) =>{
             ...user,
             [event.target.name]:event.target.value
         });
+    }
+
+    const handleSearchChange = (event) =>{
+        setSearchBy(event.target.value);
+        if(event.target.value==='')
+            all()
     }
 
     return(
@@ -207,7 +305,7 @@ export const Form = (props=undefined) =>{
             {executing && <div className='text-primary'>
                         <Spinner/>
                         </div>}
-            <form  id='create_data' className={executing?"row g-2 m-2 hidden":"row g-2 m-2"} onSubmit={(e)=>handleOnSubmit(e)}>
+            <form  id='create_data' className={executing?"row g-2 m-2 hidden":"row g-2 m-2"} onSubmit={(e)=>{crud==='Create'?handleOnSubmit(e):handleOnUpdate(e)}}>
                     <input type='hidden' value={id}/>
                     <div className='col-md'>
                         <div className='form-floating'>
@@ -272,20 +370,34 @@ export const Form = (props=undefined) =>{
                         </div>
                     </div>
                     <button type='submit' className={executing?'btn btn-gray disable':'btn btn-primary'}>
-                        Create
+                        {crud}
                     </button>
             </form>
+            <div className='input-group p-2'>
+                    <input 
+                    type='search'
+                    placeholder='Search'
+                    className='form-control'
+                    value={searchBy}
+                    onChange={handleSearchChange}
+                    aria-label='Search'
+                    aria-describedby='search-addon'
+                    />
+                <button type='button' className='btn btn-outline-primary' onClick={()=>all(searchBy)}>
+                    Search
+                </button>
+            </div>
             {deleted && <span className='text-danger'>Deleted: {countDeleted} </span>}
             {added && <span className='text-primary'>Created: {countAdded} </span>}
             <List 
             data={data} 
             key={user.id} 
-            updateData={all} 
             deleteData={deleteData}
             errorMsg={errorMsg}
             page={page}
             deleted={deleted}
             executing={executing}
+            showData={showData}
             updatePagination={updatePagination}
             countDeleted={countDeleted}
             />
